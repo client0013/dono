@@ -11,9 +11,10 @@
         .visivel { display: block; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-        .btn-del { background: #d32f2f; color: white; border: none; padding: 5px; cursor: pointer; }
-        .btn-edit { background: #1976d2; color: white; border: none; padding: 5px; cursor: pointer; margin-right: 5px; }
+        .btn-del { background: #d32f2f; color: white; border: none; padding: 5px; cursor: pointer; border-radius: 4px; }
+        .btn-edit { background: #1976d2; color: white; border: none; padding: 5px; cursor: pointer; margin-right: 5px; border-radius: 4px; }
         .pedido-card { border-bottom:1px solid #ccc; padding:15px; background:#fff; margin-bottom:15px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+        .config-tempo { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbdefb; }
     </style>
 </head>
 <body>
@@ -43,6 +44,14 @@
 </div>
 
 <div id="pedidos" class="secao">
+    
+    <div class="config-tempo">
+        <h4 style="margin-top: 0;">Configuração de Entrega</h4>
+        <label>Tempo estimado atual (minutos):</label>
+        <input id="tempo-entrega" type="number" placeholder="Ex: 80" style="padding: 5px; width: 80px;">
+        <button onclick="salvarTempo()" class="btn-edit" style="padding: 7px 15px;">Atualizar Tempo</button>
+    </div>
+
     <h3>Pedidos Recentes</h3>
     <div id="lista-pedidos">Carregando...</div>
 </div>
@@ -59,11 +68,14 @@
         document.getElementById(id).classList.add('visivel');
         event.target.classList.add('ativa');
         if(id === 'cardapio') carregarCardapio();
-        if(id === 'pedidos') carregarPedidos();
+        if(id === 'pedidos') {
+            carregarPedidos();
+            carregarTempo(); // Carrega o tempo quando abre a aba de pedidos
+        }
     }
 
     async function carregarCardapio() {
-        const res = await fetch(`${URL}/rest/v1/produtos?select=*`, { headers: { 'apikey': KEY, 'Authorization': `Bearer ${KEY}` } });
+        const res = await fetch(`${URL}/rest/v1/produtos?select=*`, { headers: head });
         const data = await res.json();
         
         const render = (cat) => data.filter(p => p.categoria === cat).map(p => `
@@ -103,14 +115,41 @@
     }
 
     async function deletar(id) {
-        await fetch(`${URL}/rest/v1/produtos?id=eq.${id}`, { method: 'DELETE', headers: { 'apikey': KEY, 'Authorization': `Bearer ${KEY}` } });
+        await fetch(`${URL}/rest/v1/produtos?id=eq.${id}`, { method: 'DELETE', headers: head });
         carregarCardapio();
     }
 
-    // CÓDIGO ATUALIZADO DOS PEDIDOS
+    // --- FUNÇÕES DE TEMPO DE ENTREGA ---
+    async function carregarTempo() {
+        try {
+            const res = await fetch(`${URL}/rest/v1/configuracoes?id=eq.1&select=tempo_minutos`, { headers: head });
+            const data = await res.json();
+            if(data.length > 0) {
+                document.getElementById("tempo-entrega").value = data[0].tempo_minutos;
+            }
+        } catch(e) { console.error("Erro ao carregar tempo:", e); }
+    }
+
+    async function salvarTempo() {
+        const tempo = document.getElementById("tempo-entrega").value;
+        if(!tempo) return alert("Digite um tempo válido.");
+        
+        try {
+            await fetch(`${URL}/rest/v1/configuracoes?id=eq.1`, { 
+                method: 'PATCH', 
+                headers: {...head, 'Prefer': 'return=representation'}, 
+                body: JSON.stringify({ tempo_minutos: parseInt(tempo) }) 
+            });
+            alert("Tempo de entrega atualizado com sucesso!");
+        } catch(e) {
+            alert("Erro ao salvar. Verifique se a tabela 'configuracoes' existe no Supabase.");
+        }
+    }
+
+    // --- FUNÇÕES DE PEDIDOS ---
     async function carregarPedidos() {
         try {
-            const res = await fetch(`${URL}/rest/v1/pedidos?select=*&order=created_at.desc`, { headers: { 'apikey': KEY, 'Authorization': `Bearer ${KEY}` } });
+            const res = await fetch(`${URL}/rest/v1/pedidos?select=*&order=created_at.desc`, { headers: head });
             const data = await res.json();
             
             if(data.length === 0){
@@ -118,6 +157,7 @@
                 return;
             }
 
+            // NOVO: Adicionado botão de excluir em cada pedido
             document.getElementById("lista-pedidos").innerHTML = data.map(p => `
                 <div class="pedido-card">
                     <b>Cliente:</b> ${p.cliente_nome} (${p.cliente_telefone})<br>
@@ -126,10 +166,20 @@
                     <pre style="font-family:inherit; margin:5px 0; white-space: pre-wrap; font-size:14px;">${p.resumo_itens}</pre>
                     <b>Total: R$ ${parseFloat(p.valor_total).toFixed(2)}</b> <br>
                     <small>Pagamento: ${p.forma_pagamento} ${p.precisa_troco ? `(Troco para R$ ${p.valor_troco})` : ''}</small>
+                    <br>
+                    <button class="btn-del" style="margin-top: 10px; width: 100%;" onclick="deletarPedido(${p.id})">Excluir Pedido Concluído</button>
                 </div>
             `).join('');
         } catch(e) {
             console.error(e);
+        }
+    }
+
+    // NOVO: Função para excluir o pedido do banco de dados
+    async function deletarPedido(id) {
+        if(confirm("Tem certeza que deseja excluir este pedido? Esta ação não pode ser desfeita.")) {
+            await fetch(`${URL}/rest/v1/pedidos?id=eq.${id}`, { method: 'DELETE', headers: head });
+            carregarPedidos(); // Atualiza a lista automaticamente após apagar
         }
     }
 
